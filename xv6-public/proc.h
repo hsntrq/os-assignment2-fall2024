@@ -12,6 +12,7 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 extern int ncpu;
+int setnice(int pid, int nice_value);
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -34,6 +35,9 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+//This enumerator will be used to determine the color of each process in the red-black tree
+enum procColor {RED, BLACK};	
+
 // Per-process state
 struct proc {
   uint sz;                     // Size of process memory (bytes)
@@ -49,6 +53,20 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  
+  // members for CFS
+  int vruntime;    	// Time elapsed since the process was created
+  int curr_runtime;		// Time process has run in the current scheduling round
+  int max_exec_time;	// Maximum execution time of the process in the current scheduling round
+  int nice_value;		// Used to determine the process's priority
+  int weight;		// Used to determine the process's maximum execution time
+
+  // members for red-black tree
+
+  enum procColor color;
+  struct proc *r;
+  struct proc *l;
+  struct proc *p;
 };
 
 // Process memory is laid out contiguously, low addresses first:

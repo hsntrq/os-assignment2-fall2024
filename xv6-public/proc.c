@@ -12,19 +12,30 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
+//Red-Black Tree data structure
+struct rbtree {
+  int length;
+  int period;
+  int total_weight;
+  struct proc *root;
+  struct proc *min_vruntime;
+  struct spinlock lock;
+}rbTree; 
+
 static struct proc *initproc;
+
+static struct rbtree *runnableTasks = &rbTree;
+
+//Set target scheduler latency and minimum granularity constants
+//Latency must be multiples of min_granularity
+static int latency = NPROC / 2;
+static int min_granularity = 2;
 
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
-
-void
-pinit(void)
-{
-  initlock(&ptable.lock, "ptable");
-}
 
 // Must be called with interrupts disabled
 int
@@ -63,6 +74,446 @@ myproc(void) {
   p = c->proc;
   popcli();
   return p;
+}
+
+
+// compute_weight(int)
+// The formula to determine weight of process is:
+// 1024/(1.25 ^ nice value of process)
+int
+compute_weight(int nice_value){
+  if(nice_value > 30){
+	nice_value = 30;
+  }
+  
+  double base = 1.25;
+  double denominator = 1.0;
+  for (int i = 0; i < nice_value; i++){
+    denominator *= base;
+  }
+  return (int) (1024/denominator);
+}
+
+int
+setnice(int pid, int nice_value)
+{
+  struct proc *p;
+  // printf("Setting nice value for process %d to %d\n", pid, nice_value);
+
+  if(nice_value < 0 || nice_value > 30)
+    return -1;  // Invalid nice value
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      // printf("Process found\n");
+      p->nice_value = nice_value;
+
+      // Recalculate the weight and max execution time
+      p->weight = compute_weight(p->nice_value);
+      p->max_exec_time = (runnableTasks->period * p->weight) / runnableTasks->total_weight;
+
+      release(&ptable.lock);
+      return 0;  // Success
+    }
+  }
+  release(&ptable.lock);
+  return -1;  // Process not found
+}
+
+void
+treeinit(struct rbtree *tree, char *lockName)
+{
+  initlock(&tree->lock, lockName);
+  tree->length = 0;
+  tree->root = 0;
+  tree->total_weight = 0;
+  tree->min_vruntime = 0;
+
+  //Initially set time slice factor for all processes
+  tree->period = latency;
+}
+
+int
+empty(struct rbtree *tree)
+{
+  return tree->length == 0;
+}
+
+int
+full(struct rbtree *tree)
+{
+  return tree->length == NPROC;
+}
+
+//This two process retrieval functions will retrive the grandparent or uncle process of the process passed into the functions. This is done to preserve red black tree properties by altering states and positions of the tree.
+struct proc*
+retrieveGrandparentproc(struct proc* process){
+  if(process != 0 && process->p != 0){
+	return process->p->p;
+  } 
+	
+  return 0;
+}
+
+struct proc*
+retrieveUncleproc(struct proc* process){
+  struct proc* grandParent = retrieveGrandparentproc(process);
+  if(grandParent != 0){
+	if(process->p == grandParent->l){
+		return grandParent->r;
+	} else {
+		return grandParent->l;
+	}
+  }
+	
+  return 0;
+}
+
+void 
+leftrotate(struct rbtree* tree, struct proc* positionProc){
+  struct proc* save_right_Proc = positionProc->r;
+	
+  positionProc->r = save_right_Proc->l;
+  if(save_right_Proc->l != 0)
+	save_right_Proc->l->p = positionProc;
+  save_right_Proc->p = positionProc->p;
+	
+  if(positionProc->p == 0){
+	tree->root = save_right_Proc;
+  } else if(positionProc == positionProc->p->l){
+	positionProc->p->l = save_right_Proc;
+  } else {
+	positionProc->p->r = save_right_Proc;
+  }
+  save_right_Proc->l = positionProc;
+  positionProc->p = save_right_Proc;
+}
+
+void 
+rightrotate(struct rbtree* tree, struct proc* positionProc){
+	
+  struct proc* save_left_Proc = positionProc->l;
+	
+  positionProc->l = save_left_Proc->r;
+	
+  //Determine parents for the process being rotated
+  if(save_left_Proc->r != 0)
+	save_left_Proc->r->p = positionProc;
+  save_left_Proc->p = positionProc->p;
+  if(positionProc->p == 0){
+	tree->root = save_left_Proc;
+  } else if(positionProc == positionProc->p->r){
+	positionProc->p->r = save_left_Proc;
+  } else {
+	positionProc->p->l = save_left_Proc;
+  }
+  save_left_Proc->r = positionProc;
+  positionProc->p = save_left_Proc;
+	
+}
+
+struct proc*
+minproc(struct proc* traversingProcess){
+	
+  if(traversingProcess != 0){
+	if(traversingProcess->l != 0){
+	    return minproc(traversingProcess->l);
+	} else {
+	    return traversingProcess;
+	}
+  }
+	return 0;
+}
+
+struct proc*
+insertproc(struct proc* traversingProcess, struct proc* insertingProcess){
+	
+  insertingProcess->color = RED;
+	
+  //i.e it is root or at leaf of tree
+  if(traversingProcess == 0){
+	return insertingProcess;
+  }		
+  //i.e everything after root
+  //move process to the right of the current subtree
+  if(traversingProcess->vruntime <= insertingProcess->vruntime){
+	insertingProcess->p = traversingProcess;
+	traversingProcess->r = insertproc(traversingProcess->r, insertingProcess);
+  } else {
+	insertingProcess->p = traversingProcess;		
+	traversingProcess->l = insertproc(traversingProcess->l, insertingProcess);
+  }
+	
+  return traversingProcess;
+}
+
+void
+fixinsert(struct rbtree* tree, struct proc* rbProcess, int cases){
+	
+  struct proc* uncle;
+  struct proc* grandparent;
+	
+  switch(cases){
+  case 1:
+	if(rbProcess->p == 0)
+		rbProcess->color = BLACK;
+	else
+		fixinsert(tree, rbProcess, 2);
+	break;
+	
+  case 2:
+	if(rbProcess->p->color == RED)
+		fixinsert(tree, rbProcess, 3);
+	break;
+	
+  case 3:
+	uncle = retrieveUncleproc(rbProcess);
+	
+	if(uncle != 0 && uncle->color == RED){
+		rbProcess->p->color = BLACK;
+		uncle->color = BLACK;
+		grandparent = retrieveGrandparentproc(rbProcess);
+		grandparent->color = RED;
+		fixinsert(tree, grandparent, 1);
+		grandparent = 0;
+	} else {
+		fixinsert(tree, rbProcess,4);
+	}
+	
+	uncle = 0;
+	break;
+  
+  case 4:
+	grandparent = retrieveGrandparentproc(rbProcess);
+	
+	if(rbProcess == rbProcess->p->r && rbProcess->p == grandparent->l){
+		leftrotate(tree, rbProcess->p);
+		rbProcess = rbProcess->l;
+	} else if(rbProcess == rbProcess->p->l && rbProcess->p == grandparent->r){
+		rightrotate(tree, rbProcess->p);
+		rbProcess = rbProcess->r;
+	}
+	fixinsert(tree, rbProcess, 5);
+	grandparent = 0;
+	break;
+	
+  case 5:
+    grandparent = retrieveGrandparentproc(rbProcess);
+	
+	if(grandparent != 0){
+		grandparent->color = RED;
+		rbProcess->p->color = BLACK;
+		if(rbProcess == rbProcess->p->l && rbProcess->p == grandparent->l){
+			rightrotate(tree, grandparent);
+		} else if(rbProcess == rbProcess->p->r && rbProcess->p == grandparent->r){
+			leftrotate(tree, grandparent);
+		}
+	}
+	
+	grandparent = 0;
+	break;
+	
+  default:
+	break;
+  }
+  return;
+}
+
+void
+add_to_tree(struct rbtree* tree, struct proc* p){
+
+  acquire(&tree->lock);
+  if(!full(tree)){	
+	//actually insert process into tree
+	tree->root = insertproc(tree->root, p);
+	if(tree->length == 0)
+		tree->root->p = 0;
+    	tree->length += 1;
+	
+	//Calculate process weight
+	p->weight = compute_weight(p->nice_value);
+
+	//perform total weight calculation 
+	tree->total_weight += p->weight;
+	
+    	//Check for possible cases for Red Black tree property violations
+	fixinsert(tree, p, 1);
+		
+	//This function call will find the process with the smallest vRuntime, unless 
+	//there was no insertion of a process that has a smaller minimum virtual runtime then the process that is being pointed by min_vruntime
+	if(tree->min_vruntime == 0 || tree->min_vruntime->l != 0)
+		tree->min_vruntime = minproc(tree->root);
+	 
+  }	
+  release(&tree->lock);
+}
+
+void
+fixdelete(struct rbtree* tree, struct proc* parentProc, struct proc* process, int cases){
+  struct proc* parentProcess;
+  struct proc* childProcess;
+  struct proc* siblingProcess;
+  
+  switch(cases){
+	case 1:
+		//Replace smallest virtual Runtime process with its right child 
+		parentProcess = parentProc;
+		childProcess = process->r;
+		
+		//if the process being removed is on the root
+		if(process == tree->root){
+			
+			tree->root = childProcess;
+			if(childProcess != 0){
+				childProcess->p = 0;
+				childProcess->color = BLACK;
+			}
+			
+		} else if(childProcess != 0 && !(process->color == childProcess->color)){
+			//Replace current process by it's right child
+			childProcess->p = parentProcess;
+			parentProcess->l = childProcess;
+			childProcess->color = BLACK;		
+		} else if(process->color == RED){		
+			parentProcess->l = childProcess;
+		} else {	
+			if(childProcess != 0)
+				childProcess->p = parentProcess;
+			
+			
+			parentProcess->l = childProcess;
+			fixdelete(tree, parentProcess, childProcess, 2);
+		}
+		
+		process->p = 0;
+		process->l = 0;
+		process->r = 0;
+		parentProcess = 0;
+		childProcess = 0;
+		break;
+		
+	case 2:
+		
+		//Check if process is not root,i.e parentProc != 0, and process is black
+		while(process != tree->root && (process == 0 || process->color == BLACK)){
+			
+			////Obtain sibling process
+			if(process == parentProc->l){
+				siblingProcess = parentProc->r;
+				
+				if(siblingProcess != 0 && siblingProcess->color == RED){
+					siblingProcess->color = BLACK;
+					parentProc->color = RED;
+					leftrotate(tree, parentProc);
+					siblingProcess = parentProc->r;
+				}
+				if((siblingProcess->l == 0 || siblingProcess->l->color == BLACK) && (siblingProcess->r == 0 || siblingProcess->r->color == BLACK)){
+					siblingProcess->color = RED;
+					//Change process pointer and parentProc pointer
+					process = parentProc;
+					parentProc = parentProc->p;
+				} else {
+					if(siblingProcess->r == 0 || siblingProcess->r->color == BLACK){
+						//Color left child
+						if(siblingProcess->l != 0){
+							siblingProcess->l->color = BLACK;
+						} 
+						siblingProcess->color = RED;
+						rightrotate(tree, siblingProcess);
+						siblingProcess = parentProc->r;
+					}
+					
+					siblingProcess->color = parentProc->color;
+					parentProc->color = BLACK;
+					siblingProcess->r->color = BLACK;
+					leftrotate(tree, parentProc);
+					process = tree->root;
+				}
+			} 
+		}
+		if(process != 0)
+			process->color = BLACK;
+		
+		break;
+	
+	default:
+		break;
+  }
+  return;
+	
+}
+
+struct proc*
+next_process(struct rbtree* tree){
+  struct proc* p;	//Process pointer utilized to hold the address of the process with smallest VRuntime 
+
+  acquire(&tree->lock);
+  if(!empty(tree)){
+
+	//If the number of processes are greater than the division between latency and minimum granularity
+	//then recalculate the period for the processes
+	//This condition is performed when the scheduler selects the next process to run
+  //The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
+	//In the CFS schduler tuning section:
+	if(tree->length > (latency / min_granularity)){
+		tree->period = tree->length * min_granularity;
+	} 
+
+	//retrive the process with the smallest virtual runtime by removing it from the red black tree and returning it
+	p = tree->min_vruntime;	
+
+	//Determine if the process that is being chosen is runnable at the time of the selection, if it is not, then don't return it.
+	if(p->state != RUNNABLE){
+  		release(&tree->lock);
+		return 0;
+	}
+
+	fixdelete(tree, tree->min_vruntime->p, tree->min_vruntime, 1);
+	tree->length -= 1;
+
+	//Determine new process with the smallest virtual runtime
+	tree->min_vruntime = minproc(tree->root);
+
+	//Calculate retrieved process's time slice based on formula: period*(process's weight/ red black tree weight)
+	//Where period is the length of the epoch
+	//The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
+	//In the scheduling section:
+	p->max_exec_time = (tree->period * p->weight / tree->total_weight);
+	
+	//Recalculate total weight of red-black tree
+	tree->total_weight -= p->weight;
+  } else 
+	p = 0;
+
+  release(&tree->lock);
+  return p;
+}
+
+int
+should_preempt(struct proc* current, struct proc* min_vruntime){
+
+  int runtime = current->curr_runtime;
+  
+  if((runtime >= current->max_exec_time) && (runtime >= min_granularity)){
+  	return 1;
+  }
+
+  if(min_vruntime != 0 && min_vruntime->state == RUNNABLE && current->vruntime > min_vruntime->vruntime){
+	  if((runtime == 0) || (runtime >= min_granularity)){
+		  return 1;
+  	}
+  }
+
+  //No preemption should occur
+  return 0;
+}
+
+void
+pinit(void)
+{
+  initlock(&ptable.lock, "ptable");
+  treeinit(runnableTasks, "runnableTasks");
 }
 
 //PAGEBREAK: 32
@@ -112,6 +563,16 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  p->vruntime = 0;
+  p->curr_runtime = 0;
+  p->max_exec_time = 0;
+  p->nice_value = 0;
+  p->weight = compute_weight(p->nice_value);
+
+  p->l = 0;
+  p->r = 0;
+  p->p = 0;
+  
   return p;
 }
 
@@ -149,6 +610,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  add_to_tree(runnableTasks, p);
 
   release(&ptable.lock);
 }
@@ -185,9 +647,8 @@ fork(void)
   struct proc *curproc = myproc();
 
   // Allocate process.
-  if((np = allocproc()) == 0){
+  if((np = allocproc()) == 0)
     return -1;
-  }
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
@@ -215,6 +676,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  add_to_tree(runnableTasks, np);
 
   release(&ptable.lock);
 
@@ -275,7 +737,7 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -332,10 +794,10 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
 
+    p = next_process(runnableTasks);
+    while(p != 0){
+    if(p->state == RUNNABLE){		
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -349,6 +811,9 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+    } 
+
+    p = next_process(runnableTasks);
     }
     release(&ptable.lock);
 
@@ -381,13 +846,19 @@ sched(void)
   mycpu()->intena = intena;
 }
 
-// Give up the CPU for one scheduling round.
+// Determine if the currently running process should be preempted or allowed to continue running
 void
 yield(void)
 {
+  struct proc *p = myproc();
   acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
-  sched();
+  if(should_preempt(p, runnableTasks->min_vruntime) == 1){
+    p->state = RUNNABLE;
+    p->vruntime = p->vruntime + p->curr_runtime;
+    p->curr_runtime = 0;
+    add_to_tree(runnableTasks, p);
+    sched();
+  }
   release(&ptable.lock);
 }
 
@@ -460,8 +931,16 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
+
+      // Update runtime stats of process being woken up
+      p->vruntime = p->vruntime + p->curr_runtime;
+      p->curr_runtime = 0;
+
+      // Insert process after it has finished Sleeping
+      add_to_tree(runnableTasks, p);
+    }
 }
 
 // Wake up all processes sleeping on chan.
@@ -486,8 +965,16 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING){
         p->state = RUNNABLE;
+
+        // Update runtime stats of process being killed
+        p->vruntime = p->vruntime + p->curr_runtime;
+        p->curr_runtime = 0;
+
+        // insert process into runnableTask tree
+        add_to_tree(runnableTasks, p);
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -507,7 +994,7 @@ procdump(void)
   [UNUSED]    "unused",
   [EMBRYO]    "embryo",
   [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
+  [RUNNABLE]  "runnable",
   [RUNNING]   "run   ",
   [ZOMBIE]    "zombie"
   };
