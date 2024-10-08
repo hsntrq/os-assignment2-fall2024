@@ -1,6 +1,6 @@
 # An xv6 Complete Fair Scheduler (CFS)
 
-In this project, you will implement a **Completely Fair Scheduler (CFS)** into the xv6 kernel. This assignment is designed to introduce you to key concepts of kernel development, process scheduling, and system calls. The CFS is a widely used scheduling algorithm in modern operating systems, which ensures that CPU time is fairly distributed among processes. By completing this assignment, you will gain hands-on experience in modifying a real kernel, writing system calls, and evaluating the performance of a new scheduler.
+In this assignment, you will implement a **Completely Fair Scheduler (CFS)** into the xv6 kernel. This assignment is designed to introduce you to key concepts of kernel development, process scheduling, and system calls. The CFS is a widely used scheduling algorithm in modern operating systems, which ensures that CPU time is fairly distributed among processes. By completing this assignment, you will gain hands-on experience in modifying a real kernel, writing system calls, and evaluating the performance of a new scheduler.
 
 ### Objectives
 - Develop a deep understanding of xv6 and kernel internals.
@@ -23,6 +23,7 @@ The Completely Fair Scheduler is designed to divide CPU time fairly among all ru
 
 ### Details
 
+
 1. **Modify the Scheduler**:
    - You will replace the default **Round-Robin** scheduler in xv6 with a simplified version of the **Completely Fair Scheduler (CFS)**.
    - The CFS will maintain a red-black tree where processes are ordered based on their **virtual runtime** (vRuntime), which tracks the amount of time a process has been allowed to execute.
@@ -44,14 +45,6 @@ The Completely Fair Scheduler is designed to divide CPU time fairly among all ru
    - When a new process is created, it should inherit the nice value and weight from its parent.
    - Each process’s time slice is determined by the ratio of its weight to the total weight of all runnable processes.
 
-### Testing and Evaluating the Scheduler
-
-Once you have completed the scheduler implementation and the `setnice()` system call, you will write a test program that:
-1. **Creates multiple processes** with different nice values.
-2. **Performs CPU-bound tasks** for each process.
-3. **Measures the CPU time** consumed by each process.
-
-The goal is to observe that processes with lower nice values (higher priority) receive more CPU time, while processes with higher nice values (lower priority) receive less.
 
 ### Comparing with the Round-Robin Scheduler
 
@@ -65,3 +58,6 @@ The goal is to observe that processes with lower nice values (higher priority) r
 
 3. **Compare the results**:
    - Report your findings using a graph and compare the performance of both schedulers.
+
+---
+You can follow **[GUIDE.md](./GUIDE.md)** to get a head start on scheduling in xv6 and implementation details for CFS.

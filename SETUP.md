@@ -89,7 +89,7 @@ sudo apt install qemu qemu-system-x86 gcc-multilib make
 To install the required compilers on Linux/WSL, use:
 
 ```sh
-prompt> sudo apt install gcc gdb
+sudo apt install gcc gdb
 ```
 
 ### 3. Building and Running xv6
@@ -103,7 +103,7 @@ cd xv6-public
 Run the following command to build and boot xv6:
 
 ```sh
-prompt> make qemu-nox
+make qemu-nox
 ```
 
 If everything is set up correctly, xv6 will boot in the terminal. Use `C-a x` to quit the emulator.
