@@ -322,31 +322,28 @@ fixinsert(struct rbtree* tree, struct proc* rbProcess, int cases){
 
 void
 add_to_tree(struct rbtree* tree, struct proc* p){
-
-  acquire(&tree->lock);
   if(!full(tree)){	
-	//actually insert process into tree
-	tree->root = insertproc(tree->root, p);
-	if(tree->length == 0)
-		tree->root->p = 0;
-    	tree->length += 1;
-	
-	//Calculate process weight
-	p->weight = compute_weight(p->nice_value);
+    //actually insert process into tree
+    tree->root = insertproc(tree->root, p);
+    if(tree->length == 0)
+      tree->root->p = 0;
+        
+    tree->length += 1;
+    
+    //Calculate process weight
+    p->weight = compute_weight(p->nice_value);
 
-	//perform total weight calculation 
-	tree->total_weight += p->weight;
-	
-    	//Check for possible cases for Red Black tree property violations
-	fixinsert(tree, p, 1);
-		
-	//This function call will find the process with the smallest vRuntime, unless 
-	//there was no insertion of a process that has a smaller minimum virtual runtime then the process that is being pointed by min_vruntime
-	if(tree->min_vruntime == 0 || tree->min_vruntime->l != 0)
-		tree->min_vruntime = minproc(tree->root);
-	 
-  }	
-  release(&tree->lock);
+    //perform total weight calculation 
+    tree->total_weight += p->weight;
+    
+    //Check for possible cases for Red Black tree property violations
+    fixinsert(tree, p, 1);
+      
+    //This function call will find the process with the smallest vRuntime, unless 
+    //there was no insertion of a process that has a smaller minimum virtual runtime then the process that is being pointed by min_vruntime
+    if(tree->min_vruntime == 0 || tree->min_vruntime->l != 0)
+      tree->min_vruntime = minproc(tree->root);
+  }
 }
 
 void
@@ -446,48 +443,39 @@ fixdelete(struct rbtree* tree, struct proc* parentProc, struct proc* process, in
 
 struct proc*
 next_process(struct rbtree* tree){
-  struct proc* p;	//Process pointer utilized to hold the address of the process with smallest VRuntime 
-
-  acquire(&tree->lock);
+  struct proc* p;	//Process pointer utilized to hold the address of the process with smallest VRuntime
   if(!empty(tree)){
+    //retrive the process with the smallest virtual runtime by removing it from the red black tree and returning it
+    p = tree->min_vruntime;	
 
-	//If the number of processes are greater than the division between latency and minimum granularity
-	//then recalculate the period for the processes
-	//This condition is performed when the scheduler selects the next process to run
-  //The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
-	//In the CFS schduler tuning section:
-	if(tree->length > (latency / min_granularity)){
-		tree->period = tree->length * min_granularity;
-	} 
+    fixdelete(tree, tree->min_vruntime->p, tree->min_vruntime, 1);
+    tree->length -= 1;
 
-	//retrive the process with the smallest virtual runtime by removing it from the red black tree and returning it
-	p = tree->min_vruntime;	
+    //Determine new process with the smallest virtual runtime
+    tree->min_vruntime = minproc(tree->root);
 
-	//Determine if the process that is being chosen is runnable at the time of the selection, if it is not, then don't return it.
-	if(p->state != RUNNABLE){
-  		release(&tree->lock);
-		return 0;
-	}
+    //If the number of processes are greater than the division between latency and minimum granularity
+    //then recalculate the period for the processes
+    //This condition is performed when the scheduler selects the next process to run
+    //The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
+    //In the CFS schduler tuning section:
+    if(tree->length > (latency / min_granularity)){
+      tree->period = tree->length * min_granularity;
+    } else {
+      tree->period = latency;
+    }
 
-	fixdelete(tree, tree->min_vruntime->p, tree->min_vruntime, 1);
-	tree->length -= 1;
-
-	//Determine new process with the smallest virtual runtime
-	tree->min_vruntime = minproc(tree->root);
-
-	//Calculate retrieved process's time slice based on formula: period*(process's weight/ red black tree weight)
-	//Where period is the length of the epoch
-	//The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
-	//In the scheduling section:
-	p->max_exec_time = (tree->period * p->weight / tree->total_weight);
-	
-	//Recalculate total weight of red-black tree
-	tree->total_weight -= p->weight;
-  } else 
-	p = 0;
-
-  release(&tree->lock);
-  return p;
+    //Calculate retrieved process's time slice based on formula: period*(process's weight/ red black tree weight)
+    //Where period is the length of the epoch
+    //The formula can be found in CFS tuning article by Jacek Kobus and Refal Szklarski
+    //In the scheduling section:
+    p->max_exec_time = (tree->period * p->weight / tree->total_weight);
+    
+    //Recalculate total weight of red-black tree
+    tree->total_weight -= p->weight;
+    return p;
+  }
+  return 0;
 }
 
 int
