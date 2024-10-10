@@ -122,6 +122,68 @@ setnice(int pid, int nice_value)
 }
 
 void
+gettreeinfo(int *count, int *total_weight, int *period)
+{
+  acquire(&runnableTasks->lock);
+  *count = runnableTasks->length;
+  *total_weight = runnableTasks->total_weight;
+  *period = runnableTasks->period;
+  release(&runnableTasks->lock);
+}
+
+void
+getprocinfo(int pid, struct proc_info *info)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      info->pid = p->pid;
+      info->nice_value = p->nice_value;
+      info->weight = p->weight;
+      info->vruntime = p->vruntime;
+      info->curr_runtime = p->curr_runtime;
+      release(&ptable.lock);
+      return;
+    }
+  }
+  release(&ptable.lock);
+  info->pid = -1;
+}
+
+int node_index;  // Global index for traversing nodes
+
+void
+traverse_rb_tree(struct proc *node, struct rb_node_info *nodes, int max_nodes)
+{
+  if(node == 0 || node_index >= max_nodes)
+    return;
+
+  nodes[node_index].pid = node->pid;
+  nodes[node_index].vruntime = node->vruntime;
+  nodes[node_index].color = (node->color == RED) ? 0 : 1;
+  nodes[node_index].left_pid = (node->l) ? node->l->pid : -1;
+  nodes[node_index].right_pid = (node->r) ? node->r->pid : -1;
+  nodes[node_index].parent_pid = (node->p) ? node->p->pid : -1;
+
+  node_index++;
+
+  traverse_rb_tree(node->l, nodes, max_nodes);
+  traverse_rb_tree(node->r, nodes, max_nodes);
+}
+
+int
+gettreenodes(int max_nodes, struct rb_node_info *nodes)
+{
+  acquire(&runnableTasks->lock);
+  node_index = 0;
+  traverse_rb_tree(runnableTasks->root, nodes, max_nodes);
+  release(&runnableTasks->lock);
+
+  return node_index;  // Return the number of nodes traversed
+}
+
+void
 treeinit(struct rbtree *tree, char *lockName)
 {
   initlock(&tree->lock, lockName);

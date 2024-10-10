@@ -1,5 +1,20 @@
 struct stat;
 struct rtcdate;
+struct proc_info {
+  int pid;
+  int nice_value;
+  int weight;
+  int vruntime;
+  int curr_runtime;
+};
+struct rb_node_info {
+  int pid;
+  int vruntime;
+  int color;      // 0 for RED, 1 for BLACK
+  int left_pid;
+  int right_pid;
+  int parent_pid;
+};
 
 // system calls
 int fork(void);
@@ -24,6 +39,9 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int setnice(int pid, int nice_value);
+int gettreeinfo(int *count, int *total_weight, int *period);
+int getprocinfo(int pid, struct proc_info *info);
+int gettreenodes(int max_nodes, struct rb_node_info *nodes);
 
 // ulib.c
 int stat(const char*, struct stat*);

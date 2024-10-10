@@ -10,9 +10,29 @@ struct cpu {
   struct proc *proc;           // The process running on this cpu or null
 };
 
+struct proc_info {
+  int pid;
+  int nice_value;
+  int weight;
+  int vruntime;
+  int curr_runtime;
+};
+
+struct rb_node_info {
+  int pid;
+  int vruntime;
+  int color;      // 0 for RED, 1 for BLACK
+  int left_pid;
+  int right_pid;
+  int parent_pid;
+};
+
 extern struct cpu cpus[NCPU];
 extern int ncpu;
 int setnice(int pid, int nice_value);
+void gettreeinfo(int *count, int *total_weight, int *period);
+void getprocinfo(int pid, struct proc_info *info);
+int gettreenodes(int max_nodes, struct rb_node_info *nodes);
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.

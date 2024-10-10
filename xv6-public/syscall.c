@@ -104,6 +104,9 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 extern int sys_setnice(void);
+extern int sys_gettreeinfo(void);
+extern int sys_getprocinfo(void);
+extern int sys_gettreenodes(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,7 +130,10 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_setnice]   sys_setnice,
+[SYS_setnice] sys_setnice,
+[SYS_gettreeinfo] sys_gettreeinfo,
+[SYS_getprocinfo] sys_getprocinfo,
+[SYS_gettreenodes] sys_gettreenodes,
 };
 
 void

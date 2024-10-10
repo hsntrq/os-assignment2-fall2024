@@ -181,7 +181,14 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
-	_test_cfs\
+	_test_preemption\
+	_test_process_insertion\
+	_test_rb_tree\
+	_test_runtime_update\
+	_test_scheduler\
+	_test_tree_init\
+	_test_tree_values\
+	_test_weights\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
